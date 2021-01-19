@@ -1271,7 +1271,6 @@ static int cluster_update_route_by_addr(redisClusterContext *cc, const char *ip,
     cluster_slot *slot, **slot_elem;
     dictIterator *dit = NULL;
     dictEntry *den;
-    listIter *lit = NULL;
     listNode *lnode;
     cluster_node *table[REDIS_CLUSTER_SLOTS];
     uint32_t j, k;
@@ -1398,12 +1397,10 @@ static int cluster_update_route_by_addr(redisClusterContext *cc, const char *ip,
             continue;
         }
 
-        lit = listGetIterator(master->slots, AL_START_HEAD);
-        if (lit == NULL) {
-            goto oom;
-        }
+        listIter lit;
+        listRewind(master->slots, &lit);
 
-        while ((lnode = listNext(lit))) {
+        while ((lnode = listNext(&lit))) {
             slot = listNodeValue(lnode);
             if (slot->start > slot->end || slot->end >= REDIS_CLUSTER_SLOTS) {
                 __redisClusterSetError(cc, REDIS_ERR_OTHER,
@@ -1417,8 +1414,6 @@ static int cluster_update_route_by_addr(redisClusterContext *cc, const char *ip,
             }
             *slot_elem = slot;
         }
-
-        listReleaseIterator(lit);
     }
 
     dictReleaseIterator(dit);
@@ -1468,7 +1463,6 @@ oom:
 
 error:
     dictReleaseIterator(dit);
-    listReleaseIterator(lit);
     if (slots != NULL) {
         if (slots == cc->slots) {
             cc->slots = NULL;
@@ -1546,7 +1540,6 @@ int cluster_update_route(redisClusterContext *cc) {
 static void print_cluster_node_list(redisClusterContext *cc) {
     dictIterator *dit = NULL;
     dictEntry *de;
-    listIter *lit;
     listNode *ln;
     cluster_node *master, *slave;
     hilist *slaves;
@@ -1574,18 +1567,14 @@ static void print_cluster_node_list(redisClusterContext *cc) {
             continue;
         }
 
-        lit = listGetIterator(slaves, AL_START_HEAD);
-        if (lit == NULL) {
-            __redisClusterSetError(cc, REDIS_ERR_OOM, "Out of memory");
-            return;
-        }
-        while ((ln = listNext(lit)) != NULL) {
+        listIter lit;
+        listRewind(slaves, &lit);
+
+        while ((ln = listNext(&lit)) != NULL) {
             slave = listNodeValue(ln);
             printf("%s\t%s\t%d\t%s\n", slave->name, slave->addr, slave->role,
                    slave->slaves ? "hava" : "null");
         }
-
-        listReleaseIterator(lit);
 
         printf("\n");
     }
@@ -2037,22 +2026,18 @@ int redisClusterSetOptionTimeout(redisClusterContext *cc,
 
                 if (node->slaves && listLength(node->slaves) > 0) {
                     cluster_node *slave;
-                    listIter *li;
+                    listIter li;
                     listNode *ln;
 
-                    li = listGetIterator(node->slaves, AL_START_HEAD);
-                    if (li == NULL) {
-                        goto oom;
-                    }
+                    listRewind(node->slaves, &li);
 
-                    while ((ln = listNext(li)) != NULL) {
+                    while ((ln = listNext(&li)) != NULL) {
                         slave = listNodeValue(ln);
                         if (slave->con && slave->con->flags & REDIS_CONNECTED &&
                             slave->con->err == 0) {
                             redisSetTimeout(slave->con, tv);
                         }
                     }
-                    listReleaseIterator(li);
                 }
             }
             dictReleaseIterator(di);
@@ -2920,42 +2905,35 @@ static void *command_post_fragment(redisClusterContext *cc, struct cmd *command,
                                    hilist *commands) {
     struct cmd *sub_command;
     listNode *list_node;
-    listIter *list_iter;
+    listIter list_iter;
     redisReply *reply = NULL, *sub_reply;
     long long count = 0;
 
-    list_iter = listGetIterator(commands, AL_START_HEAD);
-    if (list_iter == NULL) {
-        goto oom;
-    }
-    while ((list_node = listNext(list_iter)) != NULL) {
+    listRewind(commands, &list_iter);
+
+    while ((list_node = listNext(&list_iter)) != NULL) {
         sub_command = list_node->value;
         reply = sub_command->reply;
         if (reply == NULL) {
-            listReleaseIterator(list_iter);
             return NULL;
         } else if (reply->type == REDIS_REPLY_ERROR) {
-            listReleaseIterator(list_iter);
             return reply;
         }
 
         if (command->type == CMD_REQ_REDIS_MGET) {
             if (reply->type != REDIS_REPLY_ARRAY) {
                 __redisClusterSetError(cc, REDIS_ERR_OTHER, "reply type error");
-                listReleaseIterator(list_iter);
                 return NULL;
             }
         } else if (command->type == CMD_REQ_REDIS_DEL) {
             if (reply->type != REDIS_REPLY_INTEGER) {
                 __redisClusterSetError(cc, REDIS_ERR_OTHER, "reply type error");
-                listReleaseIterator(list_iter);
                 return NULL;
             }
             count += reply->integer;
         } else if (command->type == CMD_REQ_REDIS_EXISTS) {
             if (reply->type != REDIS_REPLY_INTEGER) {
                 __redisClusterSetError(cc, REDIS_ERR_OTHER, "reply type error");
-                listReleaseIterator(list_iter);
                 return NULL;
             }
             count += reply->integer;
@@ -2963,14 +2941,12 @@ static void *command_post_fragment(redisClusterContext *cc, struct cmd *command,
             if (reply->type != REDIS_REPLY_STATUS || reply->len != 2 ||
                 strcmp(reply->str, REDIS_STATUS_OK) != 0) {
                 __redisClusterSetError(cc, REDIS_ERR_OTHER, "reply type error");
-                listReleaseIterator(list_iter);
                 return NULL;
             }
         } else {
             NOT_REACHED();
         }
     }
-    listReleaseIterator(list_iter);
 
     reply = hi_calloc(1, sizeof(*reply));
     if (reply == NULL) {
@@ -3109,7 +3085,6 @@ void *redisClusterFormattedCommand(redisClusterContext *cc, char *cmd,
     struct cmd *command = NULL, *sub_command;
     hilist *commands = NULL;
     listNode *list_node;
-    listIter *list_iter = NULL;
 
     if (cc == NULL) {
         return NULL;
@@ -3152,12 +3127,10 @@ void *redisClusterFormattedCommand(redisClusterContext *cc, char *cmd,
 
     ASSERT(listLength(commands) != 1);
 
-    list_iter = listGetIterator(commands, AL_START_HEAD);
-    if (list_iter == NULL) {
-        goto oom;
-    }
+    listIter list_iter;
+    listRewind(commands, &list_iter);
 
-    while ((list_node = listNext(list_iter)) != NULL) {
+    while ((list_node = listNext(&list_iter)) != NULL) {
         sub_command = list_node->value;
 
         reply = redis_cluster_command_execute(cc, sub_command);
@@ -3181,7 +3154,6 @@ done:
         listRelease(commands);
     }
 
-    listReleaseIterator(list_iter);
     cc->retry_count = 0;
     return reply;
 
@@ -3197,7 +3169,6 @@ error:
     if (commands != NULL) {
         listRelease(commands);
     }
-    listReleaseIterator(list_iter);
     cc->retry_count = 0;
     return NULL;
 }
@@ -3265,7 +3236,6 @@ int redisClusterAppendFormattedCommand(redisClusterContext *cc, char *cmd,
     struct cmd *command = NULL, *sub_command;
     hilist *commands = NULL;
     listNode *list_node;
-    listIter *list_iter = NULL;
 
     if (cc->requests == NULL) {
         cc->requests = listCreate();
@@ -3309,12 +3279,10 @@ int redisClusterAppendFormattedCommand(redisClusterContext *cc, char *cmd,
         // Keys belongs to different slots
         ASSERT(listLength(commands) != 1);
 
-        list_iter = listGetIterator(commands, AL_START_HEAD);
-        if (list_iter == NULL) {
-            goto oom;
-        }
+        listIter list_iter;
+        listRewind(commands, &list_iter);
 
-        while ((list_node = listNext(list_iter)) != NULL) {
+        while ((list_node = listNext(&list_iter)) != NULL) {
             sub_command = list_node->value;
 
             if (__redisClusterAppendCommand(cc, sub_command) != REDIS_OK) {
@@ -3338,9 +3306,6 @@ int redisClusterAppendFormattedCommand(redisClusterContext *cc, char *cmd,
         }
     }
 
-    listReleaseIterator(list_iter);
-    list_iter = NULL;
-
     if (listAddNodeTail(cc->requests, command) == NULL) {
         goto oom;
     }
@@ -3358,7 +3323,6 @@ error:
     if (commands != NULL) {
         listRelease(commands);
     }
-    listReleaseIterator(list_iter);
 
     /* Attention: mybe here we must pop the
       sub_commands that had append to the nodes.
@@ -3518,7 +3482,6 @@ int redisClusterGetReply(redisClusterContext *cc, void **reply) {
     struct cmd *command, *sub_command;
     hilist *commands = NULL;
     listNode *list_command, *list_sub_command;
-    listIter *list_iter = NULL;
     int slot_num;
     void *sub_reply;
 
@@ -3563,13 +3526,10 @@ int redisClusterGetReply(redisClusterContext *cc, void **reply) {
 
     ASSERT(listLength(commands) != 1);
 
-    list_iter = listGetIterator(commands, AL_START_HEAD);
-    if (list_iter == NULL) {
-        __redisClusterSetError(cc, REDIS_ERR_OOM, "Out of memory");
-        goto error;
-    }
+    listIter list_iter;
+    listRewind(commands, &list_iter);
 
-    while ((list_sub_command = listNext(list_iter)) != NULL) {
+    while ((list_sub_command = listNext(&list_iter)) != NULL) {
         sub_command = list_sub_command->value;
         if (sub_command == NULL) {
             __redisClusterSetError(cc, REDIS_ERR_OTHER, "sub_command is null");
@@ -3589,7 +3549,6 @@ int redisClusterGetReply(redisClusterContext *cc, void **reply) {
 
         sub_command->reply = sub_reply;
     }
-    listReleaseIterator(list_iter);
 
     *reply = command_post_fragment(cc, command, commands);
     if (*reply == NULL) {
@@ -3601,7 +3560,6 @@ int redisClusterGetReply(redisClusterContext *cc, void **reply) {
 
 error:
 
-    listReleaseIterator(list_iter);
     listDelNode(cc->requests, list_command);
     return REDIS_ERR;
 }

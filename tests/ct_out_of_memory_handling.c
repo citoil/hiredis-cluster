@@ -102,13 +102,13 @@ void test_cluster_communication() {
 
     // Connect
     {
-        for (int i = 0; i < 133; ++i) {
+        for (int i = 0; i < 130; ++i) {
             prepare_allocation_test(cc, i);
             result = redisClusterConnect2(cc);
             assert(result == REDIS_ERR);
         }
 
-        prepare_allocation_test(cc, 133);
+        prepare_allocation_test(cc, 130);
         result = redisClusterConnect2(cc);
         assert(result == REDIS_OK);
     }
