@@ -48,6 +48,11 @@ void prepare_allocation_test(redisClusterContext *cc,
 // It will start by triggering an allocation fault, and the next iteration
 // will start with an successfull allocation and then a failing one,
 // next iteration 2 successful and one failing allocation, and so on..
+//
+// Tip: When this testcase fails after code changes in the library,
+//      use gdb to find out which iteration that fails (print i)
+//      Update i in for-loop and the prepare_allocation_test() in
+//      the test section just after.
 void test_cluster_communication() {
     int result;
     hiredisAllocFuncs ha = {
@@ -102,13 +107,13 @@ void test_cluster_communication() {
 
     // Connect
     {
-        for (int i = 0; i < 130; ++i) {
+        for (int i = 0; i < 128; ++i) {
             prepare_allocation_test(cc, i);
             result = redisClusterConnect2(cc);
             assert(result == REDIS_ERR);
         }
 
-        prepare_allocation_test(cc, 130);
+        prepare_allocation_test(cc, 128);
         result = redisClusterConnect2(cc);
         assert(result == REDIS_OK);
     }
